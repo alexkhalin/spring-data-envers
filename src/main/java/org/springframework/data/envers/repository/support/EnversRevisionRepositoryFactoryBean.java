@@ -15,6 +15,8 @@
  */
 package org.springframework.data.envers.repository.support;
 
+import java.io.Serializable;
+
 import javax.persistence.EntityManager;
 
 import org.hibernate.envers.DefaultRevisionEntity;
@@ -23,6 +25,8 @@ import org.springframework.core.GenericTypeResolver;
 import org.springframework.data.jpa.repository.support.JpaEntityInformation;
 import org.springframework.data.jpa.repository.support.JpaRepositoryFactory;
 import org.springframework.data.jpa.repository.support.JpaRepositoryFactoryBean;
+import org.springframework.data.querydsl.QuerydslPredicateExecutor;
+import org.springframework.data.querydsl.QuerydslUtils;
 import org.springframework.data.repository.core.RepositoryInformation;
 import org.springframework.data.repository.core.RepositoryMetadata;
 import org.springframework.data.repository.core.support.RepositoryFactorySupport;
@@ -35,7 +39,7 @@ import org.springframework.data.repository.history.support.RevisionEntityInforma
  * @author Oliver Gierke
  * @author Michael Igler
  */
-public class EnversRevisionRepositoryFactoryBean<T extends RevisionRepository<S, ID, N>, S, ID, N extends Number & Comparable<N>>
+public class EnversRevisionRepositoryFactoryBean<T extends RevisionRepository<S, ID, N>, S, ID extends Serializable, N extends Number & Comparable<N>>
 		extends JpaRepositoryFactoryBean<T, S, ID> {
 
 	private Class<?> revisionEntityClass;
@@ -72,7 +76,7 @@ public class EnversRevisionRepositoryFactoryBean<T extends RevisionRepository<S,
 	 * 
 	 * @author Oliver Gierke
 	 */
-	private static class RevisionRepositoryFactory<T, ID, N extends Number & Comparable<N>> extends JpaRepositoryFactory {
+	private static class RevisionRepositoryFactory<T, ID extends Serializable, N extends Number & Comparable<N>> extends JpaRepositoryFactory {
 
 		private final RevisionEntityInformation revisionEntityInformation;
 		private final EntityManager entityManager;
@@ -94,16 +98,19 @@ public class EnversRevisionRepositoryFactoryBean<T extends RevisionRepository<S,
 
 		/* 
 		 * (non-Javadoc)
-		 * @see org.springframework.data.jpa.repository.support.JpaRepositoryFactory#getTargetRepository(org.springframework.data.repository.core.RepositoryMetadata, javax.persistence.EntityManager)
+		 * @see org.springframework.data.jpa.repository.support.JpaRepositoryFactory#getTargetRepository(org.springframework.data.repository.core.RepositoryInformation)
 		 */
 		@Override
-		@SuppressWarnings({ "unchecked", "rawtypes" })
-		protected EnversRevisionRepositoryImpl getTargetRepository(RepositoryInformation information) {
+		@SuppressWarnings({ "unchecked" })
+		protected RevisionRepository<T, ID, N> getTargetRepository(RepositoryInformation information) {
 
-			JpaEntityInformation<T, Object> entityInformation = (JpaEntityInformation<T, Object>) getEntityInformation(
-					information.getDomainType());
+			JpaEntityInformation<T, ID> entityInformation = (JpaEntityInformation<T, ID>) getEntityInformation(information.getDomainType());
 
-			return new EnversRevisionRepositoryImpl<T, ID, N>(entityInformation, revisionEntityInformation, entityManager);
+			if (isQueryDslExecutor(information.getRepositoryInterface())) {
+				return new QueryDslWithEnversRevisionRepository<T, ID, N>(entityInformation, revisionEntityInformation, entityManager);
+			} else {
+				return new EnversRevisionRepositoryImpl<T, ID, N>(entityInformation , revisionEntityInformation, entityManager);
+			}
 		}
 
 		/*
@@ -112,10 +119,24 @@ public class EnversRevisionRepositoryFactoryBean<T extends RevisionRepository<S,
 		 */
 		@Override
 		protected Class<?> getRepositoryBaseClass(RepositoryMetadata metadata) {
-			return EnversRevisionRepositoryImpl.class;
+			if (isQueryDslExecutor(metadata.getRepositoryInterface())) {
+				return QueryDslWithEnversRevisionRepository.class;
+			} else {
+				return EnversRevisionRepositoryImpl.class;
+			}
 		}
 
-		/* 
+		/**
+		 * Returns whether the given repository interface requires a QueryDsl specific implementation to be chosen.
+		 *
+		 * @param repositoryInterface
+		 * @return
+		 */
+		private boolean isQueryDslExecutor(Class<?> repositoryInterface) {
+			return QuerydslUtils.QUERY_DSL_PRESENT && QuerydslPredicateExecutor.class.isAssignableFrom(repositoryInterface);
+		}
+
+		/*
 		 * (non-Javadoc)
 		 * @see org.springframework.data.repository.core.support.RepositoryFactorySupport#getRepository(java.lang.Class, java.lang.Object)
 		 */
